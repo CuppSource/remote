@@ -1,0 +1,83 @@
+
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+
+#define MAX_IP_LEN 20
+#define MAX_PASSWORD_LEN 50
+#define CERT_FILE "/tmp/x11vnc_cert/x11vnc_cert.pem"
+
+// Pop up mensagem padrão
+void display_popup(const char *message) {
+    // Seta variavel command com maximo de 100 caracteres
+    char command[100];
+    sprintf(command, "zenity --info --text='%s'", message);
+    system(command);
+}
+
+// Pega senha por meio do zenity
+void prompt_input(const char *prompt, char *input, int max_len) {
+    char command[100];
+    sprintf(command, "zenity --entry --text='%s' --hide-text", prompt);
+    // Faz um pipe e passa o input para a variavel input
+    FILE *pipe = popen(command, "r");
+    fgets(input, max_len, pipe);
+    // Sempre fechar o pipe
+    pclose(pipe);
+
+    // Remove \n(novas linhas) para previnir erros
+    input[strcspn(input, "\n")] = 0;
+}
+
+// Delete e recria o certificado ssl
+void recreate_certificate() {
+    // Checa se o arquivo existe
+    if (access(CERT_FILE, F_OK) == 0) {
+        // deleta o arquivo se ele já existe
+        if (remove(CERT_FILE) != 0) {
+            display_popup("Ocorreu algum erro ao deletar o certificado anterior, comunique o agente de TI esta mensagem.\n");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    // Gera um certificado temporario
+    char command[200];
+    sprintf(command, "openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout %s -out %s -subj '/CN=localhost'", CERT_FILE, CERT_FILE);
+    if (system(command) != 0) {
+        display_popup("Erro ao gerar certificado para a comunicação ssl, comunique o agente de TI esta mensagem .\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
+int main() {
+    char ip_address[MAX_IP_LEN];
+    char password[MAX_PASSWORD_LEN];
+
+    // Recria o certificado
+    recreate_certificate();
+
+    // Grava o endereço IP da máquina
+    FILE *hostname_pipe = popen("hostname -I", "r");
+    fgets(ip_address, MAX_IP_LEN, hostname_pipe);
+    pclose(hostname_pipe);
+
+    // Mostra o endereço IP para o usuário
+    //char mensagem[50];
+    //sprintf(mensagem, 'O acesso remoto irá ser iniciado, favor repassar o endereço %s ao técnico de TI, e clique em OK', ip_address);
+    char mensagem[100];
+    sprintf(mensagem, "O acesso remoto será iniciado, passe este endereço ao administrador: %s", ip_address);
+    display_popup(mensagem);
+
+    // Consegue a senha temporaria criada pelo usuário
+    prompt_input("Crie uma senha temporaria e repasse ao técnico de TI:", password, MAX_PASSWORD_LEN);
+
+    // Inicia o x11vnc com ssl e senha temporaria.
+    char command[200];
+    sprintf(command, "x11vnc -ssl %s -passwd %s -display :0", CERT_FILE, password);
+    system(command);
+
+    return 0;
+}
